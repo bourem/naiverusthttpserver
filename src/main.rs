@@ -8,13 +8,13 @@ fn main() {
 
     fn read_request(stream: &TcpStream) -> String {
         let mut istream = stream.try_clone().expect("couldn't clone");
-        let mut reader = io::BufReader::new(stream);
+        let reader = io::BufReader::new(stream);
         let mut request = String::new();
         let mut l;
         for line in reader.lines() {
             l = line.unwrap();
             if l == "" {
-                istream.flush();
+                istream.flush().expect("stream couldn't be flushed");
                 break;
             } else {
                 request.push_str(&l);
@@ -25,18 +25,17 @@ fn main() {
         request
     }
 
-    fn handle_client(stream: TcpStream) {
+    fn handle_client(mut stream: TcpStream) {
         println!("Hello, world!");
 
-        let mut ostream = stream.try_clone().expect("couldn't clone");
-        let mut request = String::new();
+        let request;
 
         request = read_request(&stream);
         println!("{:?} - {:?}", request.len(), request);
         
-        ostream.write_all(b"HTTP/1.0 200 OK\nContent-Type: text/html\n\n<html><body>Hello there!</body></html>").expect("write failed");
+        stream.write_all(b"HTTP/1.0 200 OK\nContent-Type: text/html\n\n<html><body>Hello there!</body></html>").expect("write failed");
 
-        ostream.flush().expect("stream flushed");
+        stream.flush().expect("stream couldn't be flushed");
     }
 
     for stream in listener.incoming() {

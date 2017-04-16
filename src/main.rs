@@ -15,6 +15,7 @@ fn main() {
         OPTIONS,
         DELETE,
         NONE,
+        Other(String),
     }
 
     #[derive(Debug)]
@@ -27,10 +28,9 @@ fn main() {
     }
 
     fn read_request(stream: &TcpStream) -> Request {
-        let istream = stream.try_clone().expect("couldn't clone");
-        let reader = io::BufReader::new(istream);
+        let mut reader = io::BufReader::new(stream);
         let mut request_string = String::new();
-        let mut l;
+        let mut l: String;
 
         let mut request = Request { 
             method: HTTPMethod::NONE,
@@ -40,8 +40,14 @@ fn main() {
             content: String::new(),
         };
 
-        for (i, line) in reader.lines().enumerate() {
-            l = line.unwrap();
+        let mut i:i32 = 0;
+
+        loop {
+            l = String::new();
+            reader.by_ref().read_line(&mut l).unwrap();
+            l = l.trim_right().to_string();
+
+            println!("{}", l);
             
             if i == 0 {
                 let mut iter = l.split_whitespace();
@@ -52,13 +58,14 @@ fn main() {
                     "HEAD" => HTTPMethod::HEAD,
                     "OPTIONS" => HTTPMethod::OPTIONS,
                     "DELETE" => HTTPMethod::DELETE,
-                    &_ => HTTPMethod::NONE,
+                    m => HTTPMethod::Other(m.to_string()),
                 };
                 request.resource = iter.next().unwrap().to_string();
                 request.http_version = iter.next().unwrap().to_string();
             }
             match l.as_str() {
                 "" => {
+                    println!("breaking now {}", i);
                     break;
                 },
                 a => {
@@ -75,15 +82,19 @@ fn main() {
                     }
                 },
             }
+
+            i += 1;
         }
+
         if request.content_length > 0 {
-            let mut buf = vec![];
-            let content_stream = stream.try_clone().expect("");
-            let mut handle = content_stream.take(request.content_length);
+            let mut buf = String::new();
+            let mut handle = reader.by_ref().take(request.content_length);
             println!("{}", request.content_length);
-            handle.read(&mut buf).unwrap();
-            println!("Content: {:?}", buf);
+            let read = handle.read_to_string(&mut buf).unwrap();
+            println!("Content: {:?}, {}", buf, read);
+            request.content = buf;
         }
+
         let mut stream = stream;
         stream.flush().expect("stream couldn't be flushed");
         println!("finished reading");

@@ -1,6 +1,6 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::prelude::*;
-use std::io;
+use std::io::BufReader;
 
 fn main() {
 
@@ -23,23 +23,13 @@ fn main() {
         method: HTTPMethod,
         resource: String,
         http_version: String,
-        content_length: u64,
-        content: String,
+        content_length: Option<u64>,
+        content: Option<String>,
     }
 
-    fn read_request(stream: &TcpStream) -> Request {
-        let mut reader = io::BufReader::new(stream);
-        let mut request_string = String::new();
+    fn read_request_headers<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
         let mut l: String;
-
-        let mut request = Request { 
-            method: HTTPMethod::NONE,
-            resource: String::new(),
-            http_version: String::new(),
-            content_length: 0,
-            content: String::new(),
-        };
-
+        
         let mut i:i32 = 0;
 
         loop {
@@ -47,8 +37,6 @@ fn main() {
             reader.by_ref().read_line(&mut l).unwrap();
             l = l.trim_right().to_string();
 
-            println!("{}", l);
-            
             if i == 0 {
                 let mut iter = l.split_whitespace();
                 request.method = match iter.next().unwrap() {
@@ -65,7 +53,6 @@ fn main() {
             }
             match l.as_str() {
                 "" => {
-                    println!("breaking now {}", i);
                     break;
                 },
                 a => {
@@ -73,11 +60,9 @@ fn main() {
                     match iter.next().unwrap() {
                         "Content-Length:" => {
                             let cl = iter.next().unwrap();
-                            request.content_length = cl.parse().unwrap();
+                            request.content_length = Some(cl.parse().unwrap());
                         },
                         _ => {
-                            request_string.push_str(&l);
-                            request_string.push_str("\n");
                         },
                     }
                 },
@@ -85,20 +70,41 @@ fn main() {
 
             i += 1;
         }
+    }
 
-        if request.content_length > 0 {
-            let mut buf = String::new();
-            let mut handle = reader.by_ref().take(request.content_length);
-            println!("{}", request.content_length);
-            let read = handle.read_to_string(&mut buf).unwrap();
-            println!("Content: {:?}, {}", buf, read);
-            request.content = buf;
+    fn read_request_body<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
+        match request.content_length {
+            Some(l) => {
+                let mut buf = String::new();
+                let mut handle = reader.by_ref().take(l);
+                let read = handle.read_to_string(&mut buf).unwrap();
+                assert_eq!(l, read as u64);
+                request.content = Some(buf);
+            },
+            None => {
+            },
         }
+    }
 
+    fn read_request(stream: &TcpStream) -> Request {
+        let mut reader = BufReader::new(stream);
+
+        let mut request = Request { 
+            method: HTTPMethod::NONE,
+            resource: String::new(),
+            http_version: String::new(),
+            content_length: None,
+            content: None,
+        };
+
+        read_request_headers(&mut reader, &mut request);
+
+        read_request_body(&mut reader, &mut request);
+        
         let mut stream = stream;
         stream.flush().expect("stream couldn't be flushed");
         println!("finished reading");
-        println!("{:?}", request_string);
+        
         request
     }
 

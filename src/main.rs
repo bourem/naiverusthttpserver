@@ -14,6 +14,8 @@ fn main() {
         HEAD,
         OPTIONS,
         DELETE,
+        CONNECT,
+        TRACE,
         NONE,
         Other(String),
     }
@@ -21,10 +23,33 @@ fn main() {
     #[derive(Debug)]
     struct Request {
         method: HTTPMethod,
-        resource: String,
+        request_target: String,
         http_version: String,
         content_length: Option<u64>,
         content: Option<String>,
+    }
+
+    #[derive(Debug)]
+    struct Response {
+        http_version: String,
+        status_code: String,
+        reason_phrase: String,
+        content_type: String,
+        content: String,
+    }
+
+    impl Response {
+        // couldn't figure how to make &[u8] + as_bytes() work,
+        // instead of Vec<u8> + into_bytes()
+        fn to_bytes(&self) -> Vec<u8> {
+            let bytes = format!("{} {} {}\nContent-type: {}\n\n{}", 
+                self.http_version, 
+                self.status_code, 
+                self.reason_phrase,
+                self.content_type,
+                self.content).into_bytes();
+            bytes
+        }
     }
 
     fn read_request_headers<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
@@ -46,9 +71,11 @@ fn main() {
                     "HEAD" => HTTPMethod::HEAD,
                     "OPTIONS" => HTTPMethod::OPTIONS,
                     "DELETE" => HTTPMethod::DELETE,
+                    "CONNECT" => HTTPMethod::CONNECT,
+                    "TRACE" => HTTPMethod::TRACE,
                     m => HTTPMethod::Other(m.to_string()),
                 };
-                request.resource = iter.next().unwrap().to_string();
+                request.request_target = iter.next().unwrap().to_string();
                 request.http_version = iter.next().unwrap().to_string();
             }
             match l.as_str() {
@@ -91,7 +118,7 @@ fn main() {
 
         let mut request = Request { 
             method: HTTPMethod::NONE,
-            resource: String::new(),
+            request_target: String::new(),
             http_version: String::new(),
             content_length: None,
             content: None,
@@ -108,15 +135,26 @@ fn main() {
         request
     }
 
+    fn form_response(request: &Request) -> Response {
+        Response { 
+            http_version: "HTTP/1.0".to_string(),
+            status_code: "200".to_string(),
+            reason_phrase: "OK".to_string(),
+            content_type: "text/html".to_string(),
+            content: "<html><body>Howdy!</body></html>".to_string(),
+        }
+    }
+
     fn handle_client(mut stream: TcpStream) {
         println!("Hello, world!");
 
-        let request;
-
-        request = read_request(&stream);
+        let request = read_request(&stream);
         println!("{:?}", request);
+
+        let response = form_response(&request);
+        println!("{:?}", response.to_bytes());
         
-        stream.write_all(b"HTTP/1.0 200 OK\nContent-Type: text/html\n\n<html><body>Hello there!</body></html>").expect("write failed");
+        stream.write_all(response.to_bytes().as_slice()).expect("write failed");
 
         stream.flush().expect("stream couldn't be flushed");
     }

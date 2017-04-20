@@ -19,8 +19,13 @@ fn main() {
         NONE,
         Other(String),
     }
+    
+    impl Default for HTTPMethod {
+        fn default() -> HTTPMethod { HTTPMethod::NONE }
+    }
 
     #[derive(Debug)]
+    #[derive(Default)]
     struct Request {
         method: HTTPMethod,
         request_target: String,
@@ -30,6 +35,7 @@ fn main() {
     }
 
     #[derive(Debug)]
+    #[derive(Default)]
     struct Response {
         http_version: String,
         status_code: String,
@@ -89,6 +95,9 @@ fn main() {
                             let cl = iter.next().unwrap();
                             request.content_length = Some(cl.parse().unwrap());
                         },
+                        "Transfer-Encoding" => {
+                            let cl = iter.next().unwrap();
+                        },
                         _ => {
                         },
                     }
@@ -115,15 +124,8 @@ fn main() {
 
     fn read_request(stream: &TcpStream) -> Request {
         let mut reader = BufReader::new(stream);
-
-        let mut request = Request { 
-            method: HTTPMethod::NONE,
-            request_target: String::new(),
-            http_version: String::new(),
-            content_length: None,
-            content: None,
-        };
-
+        let mut request: Request = Default::default();
+        
         read_request_headers(&mut reader, &mut request);
 
         read_request_body(&mut reader, &mut request);

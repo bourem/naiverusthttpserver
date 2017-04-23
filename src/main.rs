@@ -1,6 +1,8 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::fs::File;
+use std::error::Error;
 // TODO: use HashMap for Request/Response headers
 // use std::collections::HashMap;
 
@@ -145,12 +147,29 @@ fn main() {
     }
 
     fn build_response(request: &Request) -> Response {
+        let content = match request.request_target.as_str() {
+            "/" => include_str!("test.html").to_string(),
+            resource => {
+                match File::open(resource.trim_left_matches("/")) {
+                    Ok(mut file) => {
+                        let mut contents = String::new();
+                        file.read_to_string(&mut contents);
+                        contents
+                    },
+                    Err(why) => {
+                        format!("couldn't read {}: {}", 
+                                         resource, 
+                                         why.description())
+                    },
+                }
+            },
+        };
         Response { 
             http_version: "HTTP/1.1".to_string(),
             status_code: "200".to_string(),
             reason_phrase: "OK".to_string(),
             content_type: "text/html".to_string(),
-            content: "<html><body>Hello there!</body></html>".to_string(),
+            content: content.to_string(),
         }
     }
 

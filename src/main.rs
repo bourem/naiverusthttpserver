@@ -1,6 +1,8 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::prelude::*;
 use std::io::BufReader;
+// TODO: use HashMap for Request/Response headers
+// use std::collections::HashMap;
 
 fn main() {
 
@@ -48,12 +50,17 @@ fn main() {
         // couldn't figure how to make &[u8] + as_bytes() work,
         // instead of Vec<u8> + into_bytes()
         fn to_bytes(&self) -> Vec<u8> {
-            let bytes = format!("{} {} {}\nContent-type: {}\n\n{}", 
+            let content_length = self.content.len();
+            let bytes = format!("{} {} {}\r\n\
+                                Content-Type: {}\r\n\
+                                Content-Length: {}\r\n\r\n{}", 
                 self.http_version, 
                 self.status_code, 
                 self.reason_phrase,
                 self.content_type,
-                self.content).into_bytes();
+                content_length,
+                self.content,
+                ).into_bytes();
             bytes
         }
     }
@@ -93,10 +100,10 @@ fn main() {
                     match iter.next().unwrap() {
                         "Content-Length:" => {
                             let cl = iter.next().unwrap();
-                            request.content_length = Some(cl.parse().unwrap());
-                        },
-                        "Transfer-Encoding" => {
-                            let cl = iter.next().unwrap();
+                            request.content_length = match cl.parse() {
+                                Ok(l) => Some(l),
+                                Err(_) => None,
+                            };
                         },
                         _ => {
                         },
@@ -137,13 +144,13 @@ fn main() {
         request
     }
 
-    fn form_response(request: &Request) -> Response {
+    fn build_response(request: &Request) -> Response {
         Response { 
-            http_version: "HTTP/1.0".to_string(),
+            http_version: "HTTP/1.1".to_string(),
             status_code: "200".to_string(),
             reason_phrase: "OK".to_string(),
             content_type: "text/html".to_string(),
-            content: "<html><body>Howdy!</body></html>".to_string(),
+            content: "<html><body>Hello there!</body></html>".to_string(),
         }
     }
 
@@ -153,7 +160,7 @@ fn main() {
         let request = read_request(&stream);
         println!("{:?}", request);
 
-        let response = form_response(&request);
+        let response = build_response(&request);
         println!("{:?}", response.to_bytes());
         
         stream.write_all(response.to_bytes().as_slice()).expect("write failed");

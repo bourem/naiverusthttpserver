@@ -3,8 +3,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 use std::error::Error;
-// TODO: use HashMap for Request/Response headers
-// use std::collections::HashMap;
+use std::collections::HashMap;
 
 fn main() {
 
@@ -34,8 +33,8 @@ fn main() {
         method: HTTPMethod,
         request_target: String,
         http_version: String,
-        content_length: Option<u64>,
         content: Option<String>,
+        headers: HashMap<String, String>,
     }
 
     #[derive(Debug)]
@@ -68,66 +67,67 @@ fn main() {
     }
 
     fn read_request_headers<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
-        let mut l: String;
+        let mut l: String = String::new();
         
-        let mut i:i32 = 0;
-
+        {
+            // first line contains method, target, version
+            reader.read_line(&mut l).unwrap();
+            l = l.trim_right().to_string();
+            let mut iter = l.split_whitespace();
+            request.method = match iter.next().unwrap() {
+                "GET" => HTTPMethod::GET,
+                "POST" => HTTPMethod::POST,
+                "PUT" => HTTPMethod::PUT,
+                "HEAD" => HTTPMethod::HEAD,
+                "OPTIONS" => HTTPMethod::OPTIONS,
+                "DELETE" => HTTPMethod::DELETE,
+                "CONNECT" => HTTPMethod::CONNECT,
+                "TRACE" => HTTPMethod::TRACE,
+                m => HTTPMethod::Other(m.to_string()),
+            };
+            request.request_target = iter.next().unwrap().to_string();
+            request.http_version = iter.next().unwrap().to_string();
+        }
+        
         loop {
+            // loop on headers. Empty line closes the headers block.
             l = String::new();
-            reader.by_ref().read_line(&mut l).unwrap();
+            reader.read_line(&mut l).unwrap();
             l = l.trim_right().to_string();
 
-            if i == 0 {
-                let mut iter = l.split_whitespace();
-                request.method = match iter.next().unwrap() {
-                    "GET" => HTTPMethod::GET,
-                    "POST" => HTTPMethod::POST,
-                    "PUT" => HTTPMethod::PUT,
-                    "HEAD" => HTTPMethod::HEAD,
-                    "OPTIONS" => HTTPMethod::OPTIONS,
-                    "DELETE" => HTTPMethod::DELETE,
-                    "CONNECT" => HTTPMethod::CONNECT,
-                    "TRACE" => HTTPMethod::TRACE,
-                    m => HTTPMethod::Other(m.to_string()),
-                };
-                request.request_target = iter.next().unwrap().to_string();
-                request.http_version = iter.next().unwrap().to_string();
-            }
             match l.as_str() {
                 "" => {
                     break;
                 },
-                a => {
-                    let mut iter = a.split_whitespace();
-                    match iter.next().unwrap() {
-                        "Content-Length:" => {
-                            let cl = iter.next().unwrap();
-                            request.content_length = match cl.parse() {
-                                Ok(l) => Some(l),
-                                Err(_) => None,
-                            };
+                header => {
+                    match header.find(":") {
+                        Some(byte) => {
+                            let (name, value) = header.split_at(byte);
+                            let value = value[1..].trim();
+                            request.headers.insert(name.to_string(), 
+                                                   value.to_string());
                         },
-                        _ => {
-                        },
-                    }
+                        None => println!("No ':' for this header: {:?}", 
+                                         header),
+                    };
                 },
             }
-
-            i += 1;
         }
     }
 
-    fn read_request_body<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
-        match request.content_length {
-            Some(l) => {
+    fn read_request_body<R: Read>(reader: &mut BufReader<R>, 
+                                  request: &mut Request) {
+        // reading request body based on Content-Length
+        match request.headers.get("Content-Length") {
+            Some(value) => {
                 let mut buf = String::new();
-                let mut handle = reader.by_ref().take(l);
+                let length: u64 = value.parse().unwrap();
+                let mut handle = reader.by_ref().take(length);
                 let read = handle.read_to_string(&mut buf).unwrap();
-                assert_eq!(l, read as u64);
+                assert_eq!(length, read as u64);
                 request.content = Some(buf);
             },
-            None => {
-            },
+            None => println!("No body"),
         }
     }
 
@@ -141,7 +141,7 @@ fn main() {
         
         let mut stream = stream;
         stream.flush().expect("stream couldn't be flushed");
-        println!("finished reading");
+        println!("Finished reading request");
         
         request
     }
@@ -153,7 +153,7 @@ fn main() {
                 match File::open(resource.trim_left_matches("/")) {
                     Ok(mut file) => {
                         let mut contents = String::new();
-                        file.read_to_string(&mut contents);
+                        file.read_to_string(&mut contents).expect("couldn't read file");
                         contents
                     },
                     Err(why) => {
@@ -164,6 +164,7 @@ fn main() {
                 }
             },
         };
+
         Response { 
             http_version: "HTTP/1.1".to_string(),
             status_code: "200".to_string(),
@@ -173,18 +174,19 @@ fn main() {
         }
     }
 
-    fn handle_client(mut stream: TcpStream) {
-        println!("Hello, world!");
+    fn handle_client(stream: TcpStream) {
+        println!("Connection received");
 
         let request = read_request(&stream);
         println!("{:?}", request);
 
         let response = build_response(&request);
         println!("{:?}", response.to_bytes());
-        
-        stream.write_all(response.to_bytes().as_slice()).expect("write failed");
+       
+        let mut ostream = stream.try_clone().expect("clone failed...");
+        ostream.write_all(response.to_bytes().as_slice()).expect("write failed");
 
-        stream.flush().expect("stream couldn't be flushed");
+        ostream.flush().expect("stream couldn't be flushed");
     }
 
     for stream in listener.incoming() {

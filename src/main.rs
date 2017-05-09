@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 fn main() {
 
-    let listener = TcpListener::bind("127.0.0.1:8000").expect("failed to start server");
+    let listener = TcpListener::bind("127.0.0.1:8000")
+        .expect("failed to start server");
 
     #[derive(Debug)]
     enum HTTPMethod {
@@ -44,29 +45,29 @@ fn main() {
         status_code: String,
         reason_phrase: String,
         content_type: String,
-        content: String,
+        content: Vec<u8>,
     }
 
     impl Response {
         // couldn't figure how to make &[u8] + as_bytes() work,
         // instead of Vec<u8> + into_bytes()
-        fn to_bytes(&self) -> Vec<u8> {
+        fn get_headers_as_bytes(&self) -> Vec<u8> {
             let content_length = self.content.len();
             let bytes = format!("{} {} {}\r\n\
                                 Content-Type: {}\r\n\
-                                Content-Length: {}\r\n\r\n{}", 
+                                Content-Length: {}\r\n\r\n", 
                 self.http_version, 
                 self.status_code, 
                 self.reason_phrase,
                 self.content_type,
-                content_length,
-                self.content,
+                content_length
                 ).into_bytes();
             bytes
         }
     }
 
-    fn read_request_headers<R: Read>(reader: &mut BufReader<R>, request: &mut Request) {
+    fn read_request_headers<R: Read>(reader: &mut BufReader<R>, 
+                                     request: &mut Request) {
         let mut l: String = String::new();
         
         {
@@ -147,19 +148,39 @@ fn main() {
     }
 
     fn build_response(request: &Request) -> Response {
-        let content = match request.request_target.as_str() {
-            "/" => include_str!("test.html").to_string(),
+        let (content_type, content): (&str, Vec<u8>) = match request.request_target.as_str() {
+            "/" => ("text/html",String::from("Index").into_bytes()),
             resource => {
+                // TODO: find a better way to get file type
+                let file_type = match resource.rfind(".") {
+                    Some(byte) => {
+                        match resource.split_at(byte) {
+                            ("", fn_ext) => "text/plain",
+                            (fn_core, "") => "text/plain",
+                            (_, fn_ext) => {
+                                println!("{}", fn_ext);
+                                match fn_ext {
+                                    ".ico" => "image/x-icon",
+                                    _ => "text/html",
+                                }
+                            },
+                        }
+                    },
+                    None => "text/plain",
+                };
+                println!("{}", file_type);
                 match File::open(resource.trim_left_matches("/")) {
                     Ok(mut file) => {
-                        let mut contents = String::new();
-                        file.read_to_string(&mut contents).expect("couldn't read file");
-                        contents
+                        let mut contents = Vec::new();
+                        file.read_to_end(&mut contents)
+                            .expect("couldn't read file");
+                        (file_type, contents)
                     },
                     Err(why) => {
-                        format!("couldn't read {}: {}", 
+                        println!("couldn't read {}: {}", 
                                          resource, 
-                                         why.description())
+                                         why.description());
+                        ("text/html",String::from("404").into_bytes())
                     },
                 }
             },
@@ -169,8 +190,8 @@ fn main() {
             http_version: "HTTP/1.1".to_string(),
             status_code: "200".to_string(),
             reason_phrase: "OK".to_string(),
-            content_type: "text/html".to_string(),
-            content: content.to_string(),
+            content_type: content_type.to_string(),
+            content: content,
         }
     }
 
@@ -181,10 +202,12 @@ fn main() {
         println!("{:?}", request);
 
         let response = build_response(&request);
-        println!("{:?}", response.to_bytes());
        
         let mut ostream = stream.try_clone().expect("clone failed...");
-        ostream.write_all(response.to_bytes().as_slice()).expect("write failed");
+        ostream.write_all(response.get_headers_as_bytes().as_slice())
+            .expect("write failed");
+        ostream.write_all(response.content.as_slice())
+            .expect("write failed");
 
         ostream.flush().expect("stream couldn't be flushed");
     }
